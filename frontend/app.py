@@ -25,8 +25,8 @@ page = st.sidebar.radio("Navigate", [
 ])
 
 if page == "🏠 Home":
-    from pages import home
-    home.show()
+    st.title("🏠 Home")
+    st.info("Home page coming soon!")
 elif page == "📖 Reader":
     reader.show()
 elif page == "📚 Library":
