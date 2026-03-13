@@ -28,6 +28,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -51,28 +52,5 @@ def on_startup():
 #
 # Each router handles one feature area.
 # prefix="/users" means all routes in users.py start with /users
-#   e.g. GET /users, POST /users, GET /users/1
 # tags=["Users"] groups them nicely in the Swagger docs
-# ─────────────────────────────────────────────────────────────────────────────
-app.include_router(users.router,           prefix="/users",           tags=["Users"])
-app.include_router(books.router,           prefix="/books",           tags=["Books"])
-app.include_router(shelf.router,           prefix="/shelf",           tags=["Shelf"])
-app.include_router(reviews.router,         prefix="/reviews",         tags=["Reviews"])
-app.include_router(highlights.router,      prefix="/highlights",      tags=["Highlights"])
-app.include_router(recommendations.router, prefix="/recommendations", tags=["Recommendations"])
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ROOT ENDPOINT
-#
-# A simple health check — visit http://localhost:8000
-# to confirm the server is running
-# ─────────────────────────────────────────────────────────────────────────────
-@app.get("/")
-def root():
-    return {
-        "app":     "BookSphere API",
-        "version": "1.0.0",
-        "status":  "running",
-        "docs":    "http://localhost:8000/docs"
-    }
+# ───────────────────────────────
