@@ -1,56 +1,128 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
+import requests
+import sys, os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_conn
 from models import BookCreate, BookResponse, MessageResponse
-import requests
 
-router = APIRouter()
+# All endpoints here will start with /books
+router = APIRouter(prefix="/books", tags=["Books"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET ALL BOOKS
-# GET /books
-#
-# Returns all books with their author name joined in.
-# Optional genre filter — GET /books?genre=Mystery
+# GET /books/
+# Returns every book in the DB with author name
+# Used by: discover.py to show the full catalog
 # ─────────────────────────────────────────────────────────────────────────────
 @router.get("/", response_model=list[BookResponse])
-def get_all_books(genre: str = None):
+def get_all_books():
     conn = get_conn()
-
-    # We JOIN authors table so we get author_name in one query
-    # instead of making a separate call for each book
-    if genre:
-        rows = conn.execute("""
-            SELECT b.*, a.name as author_name
-            FROM books b
-            JOIN authors a ON b.author_id = a.id
-            WHERE LOWER(b.genre) = LOWER(?)
-            ORDER BY b.title
-        """, (genre,)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT b.*, a.name as author_name
-            FROM books b
-            JOIN authors a ON b.author_id = a.id
-            ORDER BY b.title
-        """).fetchall()
-
+    rows = conn.execute("""
+        SELECT b.*, a.name AS author_name
+        FROM books b
+        JOIN authors a ON b.author_id = a.id
+        ORDER BY b.title
+    """).fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET ONE BOOK
+# GET /books/search/{query}
+# Search books by title, author or genre
+# LIKE with % means "contains" — search "sher" finds "Sherlock Holmes"
+# MUST be defined BEFORE /{book_id} — FastAPI reads routes top to bottom
+# ─────────────────────────────────────────────────────────────────────────────
+@router.get("/search/{query}", response_model=list[BookResponse])
+def search_books(query: str):
+    conn = get_conn()
+    pattern = f"%{query}%"
+    rows = conn.execute("""
+        SELECT b.*, a.name AS author_name
+        FROM books b
+        JOIN authors a ON b.author_id = a.id
+        WHERE b.title LIKE ? OR a.name LIKE ? OR b.genre LIKE ?
+        ORDER BY b.title
+    """, (pattern, pattern, pattern)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /books/genre/{genre}
+# Filter books by genre — used on Discover page genre buttons
+# ─────────────────────────────────────────────────────────────────────────────
+@router.get("/genre/{genre}", response_model=list[BookResponse])
+def get_books_by_genre(genre: str):
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT b.*, a.name AS author_name
+        FROM books b
+        JOIN authors a ON b.author_id = a.id
+        WHERE b.genre LIKE ?
+        ORDER BY b.title
+    """, (f"%{genre}%",)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /books/text/{gutenberg_id}
+# Fetches actual full book text from Project Gutenberg
+# gutenberg_id is stored in our books table
+# e.g. Pride and Prejudice = 1342
+# Returns first 50,000 characters so the reader loads fast
+# ─────────────────────────────────────────────────────────────────────────────
+@router.get("/text/{gutenberg_id}")
+def get_book_text(gutenberg_id: int):
+    # Gutenberg serves plain text at this URL pattern
+    url = f"https://www.gutenberg.org/cache/epub/{gutenberg_id}/pg{gutenberg_id}.txt"
+
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Book text not found on Gutenberg")
+
+        text = response.text
+
+        # Gutenberg files have a long header/footer with legal info
+        # We try to strip everything before "*** START OF" marker
+        start_marker = "*** START OF"
+        end_marker = "*** END OF"
+
+        if start_marker in text:
+            text = text[text.index(start_marker):]
+            # Skip past the marker line itself
+            text = text[text.index("\n") + 1:]
+
+        if end_marker in text:
+            text = text[:text.index(end_marker)]
+
+        # Return only first 50,000 characters — enough for ~150 pages
+        return {
+            "gutenberg_id": gutenberg_id,
+            "text": text[:50000].strip(),
+            "total_chars": len(text)
+        }
+
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=408, detail="Gutenberg took too long to respond")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GET /books/{book_id}
-#
-# Returns a single book with full details.
-# Used by the reader page and book detail view.
+# Get one specific book by its database ID
+# Used by reader.py when opening a book
+# NOTE: This must come AFTER /search and /genre routes
 # ─────────────────────────────────────────────────────────────────────────────
 @router.get("/{book_id}", response_model=BookResponse)
 def get_book(book_id: int):
     conn = get_conn()
     row = conn.execute("""
-        SELECT b.*, a.name as author_name
+        SELECT b.*, a.name AS author_name
         FROM books b
         JOIN authors a ON b.author_id = a.id
         WHERE b.id = ?
@@ -59,221 +131,50 @@ def get_book(book_id: int):
 
     if not row:
         raise HTTPException(status_code=404, detail="Book not found")
-
     return dict(row)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SEARCH BOOKS
-# GET /books/search/local?q=sherlock
-#
-# Searches our local database by title, author or genre.
-# This is different from the Gutenberg search below —
-# this only searches books already in our database.
-# ─────────────────────────────────────────────────────────────────────────────
-@router.get("/search/local", response_model=list[BookResponse])
-def search_local(q: str = Query(..., description="Search by title, author or genre")):
-    conn = get_conn()
-    # % is a wildcard in SQL LIKE — matches anything before or after
-    # e.g. searching "sher" matches "Sherlock Holmes"
-    pattern = f"%{q}%"
-    rows = conn.execute("""
-        SELECT b.*, a.name as author_name
-        FROM books b
-        JOIN authors a ON b.author_id = a.id
-        WHERE b.title      LIKE ? 
-           OR a.name       LIKE ?
-           OR b.genre      LIKE ?
-           OR b.description LIKE ?
-        ORDER BY b.title
-    """, (pattern, pattern, pattern, pattern)).fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SEARCH GUTENBERG
-# GET /books/search/gutenberg?q=dracula
-#
-# Searches Project Gutenberg live via the Gutendex API.
-# Returns books not yet in our database that can be added.
-# Gutendex is a free API wrapper around Project Gutenberg —
-# no API key needed.
-# ─────────────────────────────────────────────────────────────────────────────
-@router.get("/search/gutenberg")
-def search_gutenberg(q: str = Query(..., description="Search Gutenberg catalogue")):
-    try:
-        resp = requests.get(
-            f"https://gutendex.com/books/?search={q}&languages=en",
-            timeout=8
-        )
-        data = resp.json()
-        results = []
-
-        for b in data.get("results", [])[:8]:
-            # Gutenberg stores authors as a list — join them
-            authors  = ", ".join([a["name"] for a in b.get("authors", [])])
-            cover    = b.get("formats", {}).get("image/jpeg", "")
-            subjects = b.get("subjects", [])
-            genre    = subjects[0].split("--")[0].strip() if subjects else "Classic"
-
-            results.append({
-                "gutenberg_id": b["id"],
-                "title":        b["title"],
-                "author":       authors or "Unknown",
-                "genre":        genre[:40],
-                "cover_url":    cover,
-            })
-
-        return results
-
-    except Exception as e:
-        raise HTTPException(status_code=503, detail="Gutenberg search unavailable")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# READ BOOK TEXT
-# GET /books/{book_id}/read?page=1
-#
-# This is the core of the in-app reader.
-# Fetches full book text from Project Gutenberg,
-# cleans the header/footer, and returns one page at a time.
-#
-# page_size=2500 means each page is ~2500 characters
-# which is roughly one screen of comfortable reading.
-# ─────────────────────────────────────────────────────────────────────────────
-@router.get("/{book_id}/read")
-def read_book(book_id: int, page: int = 1, page_size: int = 2500):
-    conn = get_conn()
-    book = conn.execute(
-        "SELECT * FROM books WHERE id = ?", (book_id,)
-    ).fetchone()
-    conn.close()
-
-    if not book:
-        raise HTTPException(status_code=404, detail="Book not found")
-
-    gid = book["gutenberg_id"]
-    if not gid:
-        raise HTTPException(status_code=400, detail="No Gutenberg source for this book")
-
-    # Try multiple URL formats — Gutenberg has inconsistent file locations
-    urls = [
-        f"https://www.gutenberg.org/files/{gid}/{gid}-0.txt",
-        f"https://www.gutenberg.org/cache/epub/{gid}/pg{gid}.txt",
-    ]
-
-    text = None
-    for url in urls:
-        try:
-            resp = requests.get(url, timeout=12)
-            if resp.status_code == 200:
-                text = resp.text
-                break
-        except:
-            continue
-
-    # If direct URLs fail, use Gutendex to find the download link
-    if not text:
-        try:
-            meta = requests.get(
-                f"https://gutendex.com/books/{gid}", timeout=6
-            ).json()
-            formats = meta.get("formats", {})
-            for fmt in ["text/plain; charset=utf-8", "text/plain"]:
-                if fmt in formats:
-                    resp = requests.get(formats[fmt], timeout=12)
-                    if resp.status_code == 200:
-                        text = resp.text
-                        break
-        except:
-            pass
-
-    if not text:
-        raise HTTPException(
-            status_code=503,
-            detail="Could not fetch book text. Try again shortly."
-        )
-
-    # ── Clean Gutenberg header and footer ─────────────────────────────────────
-    # Every Gutenberg book has a long legal header before the actual text
-    # and a footer after it. We strip these out.
-    for marker in ["*** START OF", "***START OF"]:
-        idx = text.find(marker)
-        if idx != -1:
-            text = text[idx:]
-            text = text[text.find("\n") + 1:]
-            break
-
-    for marker in ["*** END OF", "***END OF", "End of Project Gutenberg"]:
-        idx = text.find(marker)
-        if idx != -1:
-            text = text[:idx]
-            break
-
-    text = text.strip()
-
-    # ── Paginate ──────────────────────────────────────────────────────────────
-    # Split the full text into pages by character count
-    total_chars = len(text)
-    total_pages = max(1, total_chars // page_size)
-    start       = (page - 1) * page_size
-    chunk       = text[start: start + page_size]
-
-    return {
-        "book_id":     book_id,
-        "title":       book["title"],
-        "page":        page,
-        "total_pages": total_pages,
-        "content":     chunk,
-        "has_prev":    page > 1,
-        "has_next":    (start + page_size) < total_chars,
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ADD BOOK MANUALLY
-# POST /books
-#
-# Adds a new book to our local database.
-# Used when a user finds a book on Gutenberg and wants to add it.
+# POST /books/
+# Add a new book to the database manually
+# Used if someone wants to add a book not in the seed data
 # ─────────────────────────────────────────────────────────────────────────────
 @router.post("/", response_model=BookResponse)
-def add_book(data: BookCreate):
+def add_book(book: BookCreate):
     conn = get_conn()
 
-    # Check author exists
+    # Check the author exists first
     author = conn.execute(
-        "SELECT * FROM authors WHERE id = ?", (data.author_id,)
+        "SELECT * FROM authors WHERE id = ?", (book.author_id,)
     ).fetchone()
+
     if not author:
         conn.close()
         raise HTTPException(status_code=404, detail="Author not found")
 
-    conn.execute("""
-        INSERT INTO books
-            (gutenberg_id, title, author_id, genre, cover_url,
-             total_pages, description, publish_year, language)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        data.gutenberg_id,
-        data.title,
-        data.author_id,
-        data.genre,
-        data.cover_url,
-        data.total_pages,
-        data.description,
-        data.publish_year,
-        data.language
-    ))
-    conn.commit()
+    try:
+        c = conn.execute("""
+            INSERT INTO books
+                (gutenberg_id, title, author_id, genre, cover_url,
+                 total_pages, description, publish_year, language)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            book.gutenberg_id, book.title, book.author_id,
+            book.genre, book.cover_url, book.total_pages,
+            book.description, book.publish_year, book.language
+        ))
+        conn.commit()
+        new_id = c.lastrowid
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
 
-    # Return the newly added book with author name
+    # Fetch and return the newly created book
     row = conn.execute("""
-        SELECT b.*, a.name as author_name
+        SELECT b.*, a.name AS author_name
         FROM books b
         JOIN authors a ON b.author_id = a.id
-        WHERE b.title = ? AND b.author_id = ?
-    """, (data.title, data.author_id)).fetchone()
+        WHERE b.id = ?
+    """, (new_id,)).fetchone()
     conn.close()
     return dict(row)
