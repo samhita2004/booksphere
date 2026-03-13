@@ -54,3 +54,20 @@ def on_startup():
 # prefix="/users" means all routes in users.py start with /users
 # tags=["Users"] groups them nicely in the Swagger docs
 # ───────────────────────────────
+
+
+app.include_router(users.router,           prefix="/users",           tags=["Users"])
+app.include_router(books.router,           prefix="/books",           tags=["Books"])
+app.include_router(shelf.router,           prefix="/shelf",           tags=["Shelf"])
+app.include_router(reviews.router,         prefix="/reviews",         tags=["Reviews"])
+app.include_router(highlights.router,      prefix="/highlights",      tags=["Highlights"])
+app.include_router(recommendations.router, prefix="/recommendations", tags=["Recommendations"])
+
+@app.get("/")
+def root():
+    return {
+        "app":     "BookSphere API",
+        "version": "1.0.0",
+        "status":  "running",
+        "docs":    "http://localhost:8000/docs"
+    }
