@@ -57,11 +57,11 @@ def on_startup():
 
 
 app.include_router(users.router,           prefix="/users",           tags=["Users"])
-app.include_router(books.router,           prefix="/books",           tags=["Books"])
-app.include_router(shelf.router,           prefix="/shelf",           tags=["Shelf"])
-app.include_router(reviews.router,         prefix="/reviews",         tags=["Reviews"])
-app.include_router(highlights.router,      prefix="/highlights",      tags=["Highlights"])
-app.include_router(recommendations.router, prefix="/recommendations", tags=["Recommendations"])
+app.include_router(books.router)
+app.include_router(shelf.router)
+app.include_router(reviews.router)
+app.include_router(highlights.router)
+app.include_router(recommendations.router)
 
 @app.get("/")
 def root():
