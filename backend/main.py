@@ -54,3 +54,5 @@ def on_startup():
 # prefix="/users" means all routes in users.py start with /users
 # tags=["Users"] groups them nicely in the Swagger docs
 # ───────────────────────────────
+app.include_router(users.router)     
+app.include_router(reviews.router) 
