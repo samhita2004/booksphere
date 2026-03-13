@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+# Virtual environment — never upload this
+venv/
+env/
+.venv/
+
+# Database file — each teammate has their own local copy
+backend/booksphere.db
+
+# VS Code settings
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
