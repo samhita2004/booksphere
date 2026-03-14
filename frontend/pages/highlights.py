@@ -1,102 +1,93 @@
 import streamlit as st
 import requests
 
-API = "http://localhost:8000"
-
-USER_MAP = {
-    "Priya Sharma": 1, "Rahul Verma": 2,
-    "Ananya Iyer": 3, "Karthik Rao": 4, "Meera Nair": 5
-}
-
 def show():
-    st.title("💡 Highlights")
+    st.markdown("""
+    <h1 style='font-family:"Playfair Display",serif; font-size:28px;
+               color:#e8d5a3; margin-bottom:24px;'>💡 Highlights</h1>
+    """, unsafe_allow_html=True)
 
-    # User selector
-    selected_user = st.selectbox("Select User", list(USER_MAP.keys()))
-    user_id = USER_MAP[selected_user]
+    st.markdown("""
+    <div style='background:#1c1a15; border:1px solid #3a3428; border-radius:14px;
+                padding:24px 28px; margin-bottom:20px;'>
+        <p style='font-size:14px; color:#b09e78; line-height:1.6;'>
+            Save and organize your favorite quotes and passages from books you're reading.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.divider()
+    # View Highlights
+    st.markdown("""
+    <div style='font-family:"Playfair Display",serif; font-size:17px; color:#e8d5a3; 
+                margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid #3a3428;'>
+        Your Highlights
+    </div>
+    """, unsafe_allow_html=True)
 
-    # Tabs — My Highlights and Book Highlights
-    tab1, tab2 = st.tabs(["My Highlights", "Browse by Book"])
+    book_id = st.number_input("Filter by Book ID (optional)", min_value=0, step=1, value=0)
 
-    with tab1:
-        show_user_highlights(user_id)
+    if st.button("Load Highlights"):
+        try:
+            if book_id > 0:
+                res = requests.get(f"http://localhost:8000/highlights/book/{book_id}")
+            else:
+                res = requests.get("http://localhost:8000/highlights/")
+            
+            highlights = res.json()
+            if not highlights:
+                st.info("No highlights yet. Add some when you're reading!")
+            else:
+                for h in highlights:
+                    st.markdown(f"""
+                    <div style='background:#1c1a15; border:1px solid #3a3428; border-radius:10px;
+                                padding:16px 18px; margin-bottom:12px; border-left:3px solid #c9973a;'>
+                        <div style='font-size:13px; color:#e8d5a3; line-height:1.6; margin-bottom:8px;
+                                    font-style:italic;'>
+                            "{h["highlight_text"]}"
+                        </div>
+                        <div style='font-size:11px; color:#6e5f44;'>
+                            Book #{h["book_id"]} · Page {h.get("page_number", "N/A")}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Could not load highlights: {str(e)}")
 
-    with tab2:
-        show_book_highlights()
+    st.markdown("<hr style='border-color:#3a3428; margin:28px 0;'>", unsafe_allow_html=True)
 
+    # Add New Highlight
+    st.markdown("""
+    <div style='font-family:"Playfair Display",serif; font-size:17px; color:#e8d5a3; 
+                margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid #3a3428;'>
+        Save a New Highlight
+    </div>
+    """, unsafe_allow_html=True)
 
-def show_user_highlights(user_id):
-    res = requests.get(f"{API}/highlights/user/{user_id}")
+    with st.form("highlight_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            user_id = st.number_input("Your User ID", min_value=1, step=1)
+        with col2:
+            book_id_new = st.number_input("Book ID", min_value=1, step=1)
+        
+        page_number = st.number_input("Page Number (optional)", min_value=1, step=1, value=1)
+        highlight_text = st.text_area("Highlight Text", placeholder="Paste the quote or passage you want to save...")
+        submitted = st.form_submit_button("Save Highlight")
 
-    if res.status_code != 200:
-        st.error("Could not load highlights.")
-        return
-
-    highlights = res.json()
-
-    if not highlights:
-        st.info("No highlights yet! Save quotes while reading.")
-        return
-
-    for h in highlights:
-        with st.container():
-            # Quote in a blockquote style
-            st.markdown(f"> *{h['quote']}*")
-            st.caption(f"📖 {h['book_title']} · Page {h['page_number']}")
-
-            # Show note if exists
-            if h["note"]:
-                st.caption(f"💭 {h['note']}")
-
-            # Like button
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button(f"❤️ {h['likes']}", key=f"like_{h['id']}"):
-                    requests.put(f"{API}/highlights/{h['id']}/like")
-                    st.rerun()
-            with col2:
-                if st.button("🗑️ Delete", key=f"del_{h['id']}"):
-                    requests.delete(f"{API}/highlights/{h['id']}")
-                    st.rerun()
-
-            st.divider()
-
-
-def show_book_highlights(user_id=None):
-    # Get all books for dropdown
-    res = requests.get(f"{API}/books/")
-    if res.status_code != 200:
-        st.error("Could not load books.")
-        return
-
-    books = res.json()
-    book_map = {b["title"]: b["id"] for b in books}
-
-    selected_book = st.selectbox("Choose a book", list(book_map.keys()))
-    book_id = book_map[selected_book]
-
-    # Fetch highlights for selected book
-    res = requests.get(f"{API}/highlights/book/{book_id}")
-    highlights = res.json()
-
-    if not highlights:
-        st.info("No highlights for this book yet!")
-        return
-
-    for h in highlights:
-        with st.container():
-            st.markdown(f"> *{h['quote']}*")
-            st.caption(f"👤 {h['display_name']} · Page {h['page_number']}")
-
-            if h["note"]:
-                st.caption(f"💭 {h['note']}")
-
-            col1, _ = st.columns([1, 4])
-            with col1:
-                if st.button(f"❤️ {h['likes']}", key=f"blike_{h['id']}"):
-                    requests.put(f"{API}/highlights/{h['id']}/like")
-                    st.rerun()
-
-            st.divider()
+    if submitted:
+        if not highlight_text.strip():
+            st.error("Please enter highlight text.")
+        else:
+            try:
+                res = requests.post("http://localhost:8000/highlights/", json={
+                    "user_id": user_id,
+                    "book_id": book_id_new,
+                    "highlight_text": highlight_text,
+                    "page_number": page_number
+                })
+                if res.status_code == 200:
+                    st.success("Highlight saved! 🎉")
+                else:
+                    st.error(res.json().get("detail", "Could not save highlight"))
+            except Exception as e:
+                st.error(f"Could not connect to server: {str(e)}")
