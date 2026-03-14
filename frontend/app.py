@@ -1,5 +1,5 @@
 import streamlit as st
-from pages import reader, library, discover  # Divya's pages
+from pages import reader, library, discover, highlights, reviews, leaderboard, challenges, analytics, group, home
 
 st.set_page_config(
     page_title="BookSphere",
@@ -262,10 +262,8 @@ elif page == "🔍 Discover":
 #    from pages import leaderboard
 #    leaderboard.show()
 elif page == "🎯 Challenges":
-    from pages import challenges
     challenges.show()
 elif page == "📊 Analytics":
-    from pages import analytics
     analytics.show()
 elif page == "👥 Groups":
     from pages import group
